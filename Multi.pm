@@ -1,4 +1,4 @@
-# $Id: Multi.pm,v 1.104 2002/01/11 20:26:10 jkeroes Exp $
+# $Id: Multi.pm,v 1.5 2003/12/18 02:35:29 toni Exp $
 #
 # SNMP::Multi -- Perl 5 object-oriented module to simplify SNMP operations
 # on multiple simultaneous agents.
@@ -38,6 +38,7 @@ SNMP::Multi - Perform SNMP operations on multiple hosts simultaneously
 	Version     => '2c',
 	Timeout     => 5,
 	Retries     => 3,
+	UseNumeric  => 1,
 	# Any additional options for SNMP::Session::new() ...
     )
     or die "$SNMP::Multi::error\n";
@@ -146,10 +147,12 @@ This optional parameter defaults to the value of $SNMP::Multi::maxsessions.
 
 =over 4
 
-The value of ``Concurrent'' limits the number of requests that may be "in
-flight" at any time.  It defaults to the value of ``MaxSessions'' (see above).
-Setting this value higher may reduce the overall runtime of the SNMP::Multi
-request, but will also likely increase network traffic and congestion.
+The value of ``Concurrent'' limits the number of requests that may be
+"in flight" at any time.  It defaults to the value of ``MaxSessions''
+(see above).  Setting this value higher may reduce the overall runtime
+of the SNMP::Multi request, but will also likely increase network
+traffic and congestion (current maintainer has had SNMP::Multi running
+smoothly with concurrent set to 512).
 
 This optional parameter defaults to the value of $SNMP::Multi::maxsessions
 or the object's 'MaxSessions' parameter.
@@ -294,7 +297,7 @@ a descriptive string describing the error from the B<error()> method.
 
 =back
 
-=item SNMP::Multi::remaining()
+=item SNMP::Multi::remaining( $req )
 
 =over 4
 
@@ -312,6 +315,11 @@ allows an application to loop on timeouts like this:
 
 	print "Timeout - retrying" if ($req = $sm->remaining());
     }
+
+You can accumulate remaining requests by passing an already existing
+SNMP::Multi::VarReq object as an argument. Remaining requests will
+then be added to that object. That allows us to to collect all
+remaining ones with ease, while looping over huge number of hosts.
 
 =back
 
@@ -573,7 +581,7 @@ Network congestion may be a serious problem for bulkwalks, due to multiple
 packets being exchanged per session.  However, network latency and variable
 target response times cause packets in multiple bulkwalk exchanges to become
 spread out as the walk progresses.  The initial exchange, however, will always
-cause congestion.
+cause congestion. 
 
 =head1 BUGS
 
@@ -588,12 +596,16 @@ L<SNMP>, the NetSNMP homepage at http://www.net-snmp.org/.
 
 Karl ("Terminator rAT") Schilke <rat@eli.net>
 
+=head1 CONTRIBUTORS
+
+Joshua Keroes, Todd Caine, Toni Prug <tony@irational.org>
+
 =head1 COPYRIGHT
 
 Developed by Karl "Terminator rAT" Schilke for Electric Lightwave, Inc.
 Copyright (c) 2000-2002 Electric Lightwave, Inc.  All rights reserved.
 
-Co-maintained by Joshua Keroes and Todd Caine <skunkworks@eli.net>.
+Co-maintained by Toni Prug. 
 
 This software is provided I<``as is''> and without any express or implied
 warranties, including, without limitation, the implied warranties of
@@ -619,14 +631,14 @@ require Exporter;
 @ISA       = qw(Exporter);
 @EXPORT    = qw( );
 
-$VERSION = "2.0";
+$VERSION = "2.1";
 
 # Global variables that can be set by the user, used to set defaults for
 # unspecified values in constructors, etc.
 #
 use vars qw/$DEBUGGING $error $timeout $retries $verbose
     $pdupacking $maxsessions $community $snmpversion
-    $getbulkmax $fatalwarn $timestamps %_handler/;
+    $getbulkmax $fatalwarn $timestamps $usenumeric %_handler/;
 
 $DEBUGGING   = 0;
 $error       = undef;		# SNMP::Multi global error (used by new()).
@@ -640,6 +652,7 @@ $snmpversion = '2c';		# Default SNMP protocol version number.
 $getbulkmax  = 100;		# Default maximum repeaters for GETBULK
 $fatalwarn   = 0;		# Croak on non-fatal exceptions (if true).
 $timestamps  = 0;		# Add timestamps to received vars
+$usenumeric  = 1;		# Don't convert iod's to strings, keep numeric
 
 # Error message "catalog".
 my %errors = (
@@ -709,6 +722,7 @@ sub new {
     $obj->{Version}     = $args{Version}     || $snmpversion;
     $obj->{GetbulkMax}  = $args{GetbulkMax}  || $getbulkmax;
     $obj->{TimeStamp}   = $args{TimeStamp}   || $timestamps;
+    $obj->{UseNumeric}  = $args{UseNumeric}  || $usenumeric;
 
     # Flag case where execute() should return after dispatching the first
     # volley of SNMP requests.  This is useful if you need to do the select
@@ -820,7 +834,7 @@ sub request {
 sub execute {
     my $multi   = shift;
     my $timeout = shift;
-    
+
     if (!defined $timeout) {
 	if ($multi->{Retries} >= 1) {
 	    $timeout = $multi->{Timeout} * ($multi->{Retries} + 1);
@@ -887,7 +901,7 @@ sub error {
 
 sub remaining {
     my $self    = shift;
-    my $remain  = SNMP::Multi::VarReq->new();
+    my $remain  = shift || SNMP::Multi::VarReq->new();
     my $anyleft = 0;
 
     my $resp  = $self->{_response};
@@ -909,7 +923,6 @@ sub response {
     my $multi = shift;
     return $multi->{_response};
 }
-
 
 #------------- SNMP::Multi PRIVATE INTERFACE FUNCTIONS ----------------------
 
@@ -996,7 +1009,7 @@ sub _build_varlist {
         # Parse the string into tag and iid (if declared), and create a VarList
         # with one Varbind from the values.
         my ($tag, $iid) = ($vars =~ /^((?:\.\d+)+|\w+)\.?(.*)$/);
-        
+
         $vlref = [[$tag, $iid]];
 
     }
@@ -1235,12 +1248,16 @@ RR: while (@{$multi->{_reqlist}}) {
 	    $! = 0;	# Reset system errno before calling new() (see below)
 
 	    $rsess = SNMP::Session->new( @SNMPargs,
-					 DestHost  => $host,
-					 Community => $rhost->{community},
-					 Version   => $rhost->{snmpversion}, 
-					 Timeout   => $multi->{Timeout} * 1e6,
-					 Retries   => $multi->{Retries},
-					 TimeStamp => $multi->{TimeStamp});
+					 DestHost    => $host,
+					 Community   => $rhost->{community},
+					 Version     => $rhost->{snmpversion}, 
+					 Timeout     => $multi->{Timeout} * 1e6,
+					 Retries     => $multi->{Retries},
+					 TimeStamp   => $multi->{TimeStamp},
+					 #UseNumeric => $multi->{UseNumeric},
+					 # UseNumeric BOMBS PERL CORE !!!
+					 UseNumeric  => 0,
+				       );
 
 	    # Give up on this particular request for now.  At some point in
 	    # the future, we should probably flag the session as failed, and
@@ -1312,10 +1329,10 @@ RR: while (@{$multi->{_reqlist}}) {
 	    # around in the SNMP object -- a no-no, but life's hard.
 	    #
 	    if ($rsess->{UseNumeric} && ! $SNMP::use_long_names) {
-		print "UseNumeric set with SNMP::use_long_names, resetting...\n"
+	    	print "UseNumeric set with SNMP::use_long_names, resetting...\n"
 				if $DEBUGGING;
 		$rsess->{UseLongNames} = 0;
-	    }
+	      }
 
 	    # Store the session for future use, and note the new session in
 	    # the in-use and available counts.
@@ -1341,6 +1358,7 @@ RR: while (@{$multi->{_reqlist}}) {
 	my @args = @$rargs;
 	push @args, $request;
 	push @args, $callback;
+
 	my $res = $rsess->$method(@args);
 
 	if (defined $res) {
@@ -1412,9 +1430,12 @@ sub _handle_VarList {
 	    # Not getbulk method, build one VarList per Varbind.
 	    #
 	    for my $vb (@$rvlist) {
+		# internal work-around: translates text tags back to IOD's,
+		# needed because of SNMP.pm bug - see below comment next to
+                # the sub itself
+		$vb = _translateObj($vb) if $multi->{UseNumeric};
 		push @aovl, SNMP::VarList->new($vb);
 	    }
-
 	} else {
 	    # Getbulk support.  Need to "decode" the VarList returned by the
 	    # getbulk method.
@@ -1423,7 +1444,7 @@ sub _handle_VarList {
 	    my $nonreps  = $rhost->{sendargs}->[0];
 	    my $reqcount = scalar @{$rhost->{requests}->[$index]};
 	    my $repeats  = $reqcount - $nonreps;
-	
+
 	    # Build an empty VarList for variable requested.
 	    for (my $i = 0; $i < $reqcount; $i ++) {
 		push @aovl, SNMP::VarList->new();
@@ -1452,6 +1473,43 @@ sub _handle_VarList {
     # which will actually place the data in the SNMP::Multi::Response object.
     #
     _handle_AoVarLists($multi, $host, $index, $raovl);
+}
+
+#====================================================================
+# internal work-around function: specific to SNMP::Varbind objects.
+# It is needed because of SNMP.pm bug where option UseNumeric makes
+# it dump core. So, when UseNumeric is set, we don't pass that
+# information to SNMP.pm, instead, to achieve the same effect, but
+# without perl core dumps, we let it convert OID's to text tags
+# which we then convert back to OID's here. Ironically enough, we do
+# that by using a wrapper around SNMP.pm own method.
+# -- 16 Dec 2003  toni@irational.org --
+#=====================================================================
+sub _translateObj {
+    my ( $varbind ) = @_;
+
+    my $type = "SNMP::Varbind";
+    if (not ref($varbind) eq $type ) {
+        printf( "\tERROR in %s: called from the %s (line %s)" .
+		" with the wrong type of argument. Only %s" .
+		" object are accepted.\n", (caller(0))[3],
+		(caller(1))[3], (caller(0))[2], $type);
+	return;
+    }
+
+    # accessors for SNMP::Varbind
+    my @vbaccessors = qw/ tag iid val type /;
+    my $new_varbind;
+    foreach my $method ( @vbaccessors ) {
+        my $value = $varbind->$method;
+	if ($method  eq "tag") {
+	    $value = SNMP::translateObj($value);
+	    $value =~ s/.//;
+	}
+	push @$new_varbind, $value;
+    };
+    # pack it back in the format we received it in
+    return bless ($new_varbind, 'SNMP::Varbind');
 }
 
 sub _handle_AoVarLists {

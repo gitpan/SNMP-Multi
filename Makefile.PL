@@ -1,4 +1,4 @@
-# $Id: Makefile.PL,v 1.4 2001/03/08 22:43:09 rat Exp $
+# $Id: Makefile.PL,v 1.1.1.1 2003/12/18 01:16:49 toni Exp $
 #
 use ExtUtils::MakeMaker;
 # See lib/ExtUtils/MakeMaker.pm for details of how to influence

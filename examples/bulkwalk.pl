@@ -1,6 +1,6 @@
 #!/usr/local/bin/perl -w
 #
-# $Id: bulkwalk.pl,v 1.2 2001/06/26 19:11:00 rat Exp $
+# $Id: bulkwalk.pl,v 1.1.1.1 2003/12/18 01:16:52 toni Exp $
 #
 # This is an example of using the 'bulkwalk' functionality of the SNMP::Multi
 # module.  This script queries the hosts 'router1.my.com' and 'router2.my.com'

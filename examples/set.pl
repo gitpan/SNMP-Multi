@@ -1,6 +1,6 @@
 #!/usr/local/bin/perl -w
 #
-# $Id: set.pl,v 1.2 2001/06/26 19:11:00 rat Exp $
+# $Id: set.pl,v 1.1.1.1 2003/12/18 01:16:52 toni Exp $
 #
 # An example of using SNMP::Multi for 'set' operations on a set of hosts.
 #

@@ -1,6 +1,6 @@
 #!/usr/local/bin/perl -w
 #
-# $Id: traffic.pl,v 1.2 2001/06/26 19:11:00 rat Exp $
+# $Id: traffic.pl,v 1.1.1.1 2003/12/18 01:16:52 toni Exp $
 #
 # A simple application to query the in/out octet counts on all interfaces
 # on a set of routers, and sum up the total bytes of traffic carried.
